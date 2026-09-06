@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#16352f">
+  <title>Kotoba Room — интерактивный японский воркбук</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;600;700;800&family=Noto+Serif+JP:wght@600;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css?v=2">
+</head>
+<body>
+  <div class="paper-noise" aria-hidden="true"></div>
+  <header class="site-header">
+    <button class="brand" id="brand-home" type="button" aria-label="На главную">
+      <span class="brand-mark">て</span><span><b>Kotoba Room</b><small>日本語 workbook</small></span>
+    </button>
+    <div id="user-menu" class="user-menu hidden">
+      <span class="online-dot" aria-hidden="true"></span><span id="header-user"></span>
+      <button id="logout-button" class="text-button" type="button">Выйти</button>
+    </div>
+  </header>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <main>
+    <section id="auth-view" class="view auth-view">
+      <div class="auth-copy">
+        <p class="kicker">日本語を一緒に</p>
+        <h1>Японский,<br><em>который видно.</em></h1>
+        <p>Интерактивный воркбук для занятия один на один. Ученик пишет — учитель видит ответ в ту же секунду.</p>
+        <div class="ink-stroke" aria-hidden="true"></div>
+      </div>
+      <div class="auth-card">
+        <div class="auth-tabs" role="tablist">
+          <button class="auth-tab active" data-auth-tab="login" type="button">Войти</button>
+          <button class="auth-tab" data-auth-tab="register" type="button">Регистрация</button>
+        </div>
+        <form id="login-form" class="auth-form">
+          <label>Логин<input name="login" required minlength="2" maxlength="32" autocomplete="username" placeholder="Например, hana"></label>
+          <button class="primary-button" type="submit">Продолжить <span>→</span></button>
+          <p class="form-note">На первом этапе вход работает без пароля.</p>
+        </form>
+        <form id="register-form" class="auth-form hidden">
+          <label>Как вас называть<input name="displayName" required maxlength="60" placeholder="Имя"></label>
+          <label>Логин<input name="login" required minlength="2" maxlength="32" autocomplete="username" placeholder="Только буквы, цифры, . _ -"></label>
+          <fieldset><legend>Ваша роль</legend><div class="role-grid">
+            <label class="role-choice"><input type="radio" name="role" value="student" checked><span class="role-icon">学</span><b>Ученик</b><small>Выполняю задания</small></label>
+            <label class="role-choice"><input type="radio" name="role" value="teacher"><span class="role-icon">先</span><b>Учитель</b><small>Создаю комнаты</small></label>
+          </div></fieldset>
+          <button class="primary-button" type="submit">Создать аккаунт <span>→</span></button>
+        </form>
+      </div>
+    </section>
+
+    <section id="dashboard-view" class="view dashboard-view hidden">
+      <div class="dashboard-head"><div><p class="kicker">Личный кабинет</p><h1 id="dashboard-greeting"></h1></div><p id="dashboard-role" class="role-badge"></p></div>
+      <div id="invite-panel" class="invite-panel hidden"></div>
+      <div id="teacher-create" class="create-panel hidden">
+        <div><span class="panel-number">新</span><h2>Новая комната</h2><p>Создайте пространство для урока и отправьте ученику ссылку.</p></div>
+        <form id="create-room-form"><label>Название урока<input name="title" maxlength="80" value="Урок по て-форме"></label><button class="primary-button" type="submit">Создать комнату</button></form>
+      </div>
+      <div class="rooms-heading"><h2>Мои комнаты</h2><span id="room-count"></span></div>
+      <div id="rooms-list" class="rooms-list"></div>
+    </section>
+
+    <section id="room-view" class="view room-view hidden">
+      <aside class="lesson-aside">
+        <button id="back-dashboard" class="back-button" type="button">← Комнаты</button>
+        <div class="lesson-index"><p class="kicker">Урок 01</p><h2>て — связываем действия</h2><div id="section-nav"></div></div>
+        <div class="room-presence"><span id="presence-dot" class="presence-dot"></span><div><b id="presence-label">Подключение…</b><small id="presence-person"></small></div></div>
+      </aside>
+      <div class="lesson-main">
+        <div class="room-toolbar">
+          <div><p class="kicker" id="room-role-label"></p><h1 id="room-title"></h1><p id="room-participants"></p></div>
+          <button id="copy-invite" class="outline-button hidden" type="button">Скопировать приглашение</button>
+        </div>
+        <div id="lesson-content"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/app.js?v=1"></script>
+</body>
+</html>

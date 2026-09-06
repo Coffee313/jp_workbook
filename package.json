@@ -1,0 +1,24 @@
+{
+  "name": "jp-workbook",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Интерактивный японский воркбук для совместной работы ученика и учителя",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "qa": "node test/qa.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.63.0",
+    "socket.io-client": "^4.8.1"
+  }
+}
