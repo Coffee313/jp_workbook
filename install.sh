@@ -5,7 +5,7 @@ SERVICE_NAME="${SERVICE_NAME:-jp-workbook}"
 PORT="${PORT:-3000}"
 BIND_ADDRESS="${BIND_ADDRESS:-127.0.0.1}"
 DATA_DIR="${DATA_DIR:-/var/lib/jp-workbook}"
-SERVER_NAME="${SERVER_NAME:-_}"
+SERVER_NAME="${SERVER_NAME:-}"
 OPEN_FIREWALL="${OPEN_FIREWALL:-false}"
 
 usage() {
@@ -44,6 +44,13 @@ done
 
 [[ "${EUID}" -eq 0 ]] || { echo "Запустите через sudo: sudo ./install.sh" >&2; exit 1; }
 [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )) || { echo "Некорректный PORT: $PORT" >&2; exit 2; }
+if [[ -z "$SERVER_NAME" ]]; then
+  SERVER_NAME="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -m1 -E '^[0-9]+(\.[0-9]+){3}$' || true)"
+  [[ -n "$SERVER_NAME" ]] || SERVER_NAME="$(hostname -f 2>/dev/null || hostname)"
+  echo "--server-name не задан; используется $SERVER_NAME"
+fi
+[[ "$SERVICE_NAME" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "Некорректное имя сервиса: $SERVICE_NAME" >&2; exit 2; }
+[[ "$SERVER_NAME" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "Некорректный домен или IP: $SERVER_NAME" >&2; exit 2; }
 for value in "$SERVICE_NAME" "$BIND_ADDRESS" "$SERVER_NAME" "$DATA_DIR"; do
   [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || { echo "Недопустимый перевод строки в параметре" >&2; exit 2; }
 done
@@ -128,11 +135,9 @@ echo "[3/7] Создание самоподписанного HTTPS-сертиф
 install -d -m 0750 "$TLS_DIR"
 if [[ ! -s "$CERT_PATH" || ! -s "$KEY_PATH" ]]; then
   CERT_NAME="$SERVER_NAME"
-  [[ "$CERT_NAME" != "_" ]] || CERT_NAME="$(hostname -f 2>/dev/null || hostname)"
   PUBLIC_IP="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -m1 -E '^[0-9]+(\.[0-9]+){3}$' || true)"
-  SAN="DNS:${CERT_NAME}"
-  [[ -n "$PUBLIC_IP" ]] && SAN="${SAN},IP:${PUBLIC_IP}"
-  [[ "$SERVER_NAME" =~ ^[0-9]+(\.[0-9]+){3}$ ]] && SAN="${SAN},IP:${SERVER_NAME}"
+  if [[ "$CERT_NAME" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then SAN="IP:${CERT_NAME}"; else SAN="DNS:${CERT_NAME}"; fi
+  [[ -n "$PUBLIC_IP" && "$PUBLIC_IP" != "$CERT_NAME" ]] && SAN="${SAN},IP:${PUBLIC_IP}"
   openssl req -x509 -newkey rsa:4096 -sha256 -days 825 -nodes \
     -keyout "$KEY_PATH" -out "$CERT_PATH" \
     -subj "/CN=${CERT_NAME}" -addext "subjectAltName=${SAN}"
@@ -182,7 +187,7 @@ systemctl restart "$SERVICE_NAME"
 echo "[5/7] Проверка Node.js-сервиса…"
 READY=false
 for _ in {1..30}; do
-  if curl -fsS "http://127.0.0.1:${PORT}/api/health" | grep -q '"status":"ok"'; then READY=true; break; fi
+  if curl --silent --fail --max-time 3 "http://127.0.0.1:${PORT}/api/health" | grep -q '"status":"ok"'; then READY=true; break; fi
   sleep 1
 done
 [[ "$READY" == true ]] || { journalctl -u "$SERVICE_NAME" -n 80 --no-pager >&2 || true; false; }
@@ -227,20 +232,13 @@ ln -sfn "$NGINX_PATH" "$NGINX_LINK"
 NGINX_INSTALLED=true
 nginx -t
 systemctl enable nginx
-systemctl reload nginx
+systemctl restart nginx
 
 HTTPS_READY=false
-if [[ "$SERVER_NAME" == "_" ]]; then
-  for _ in {1..30}; do
-    if curl --max-time 3 -kfsS "https://127.0.0.1/api/health" | grep -q '"status":"ok"'; then HTTPS_READY=true; break; fi
-    sleep 1
-  done
-else
-  for _ in {1..30}; do
-    if curl --max-time 3 -kfsS --resolve "${SERVER_NAME}:443:127.0.0.1" "https://${SERVER_NAME}/api/health" | grep -q '"status":"ok"'; then HTTPS_READY=true; break; fi
-    sleep 1
-  done
-fi
+for _ in {1..30}; do
+  if curl --silent --fail --insecure --max-time 3 --resolve "${SERVER_NAME}:443:127.0.0.1" "https://${SERVER_NAME}/api/health" | grep -q '"status":"ok"'; then HTTPS_READY=true; break; fi
+  sleep 1
+done
 [[ "$HTTPS_READY" == true ]] || { journalctl -u "$SERVICE_NAME" -n 80 --no-pager >&2 || true; journalctl -u nginx -n 80 --no-pager >&2 || true; false; }
 
 echo "[7/7] Финальная настройка…"
@@ -250,7 +248,6 @@ fi
 
 trap - ERR
 DISPLAY_HOST="$SERVER_NAME"
-if [[ "$DISPLAY_HOST" == "_" ]]; then DISPLAY_HOST="$(hostname -I 2>/dev/null | awk '{print $1}')"; fi
 cat <<EOF
 
 Kotoba Room установлен и запущен.

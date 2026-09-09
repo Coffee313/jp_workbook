@@ -26,3 +26,12 @@ test('установщик создаёт systemd-сервис, проверяе
   assert.match(script, /proxy_set_header Upgrade/);
   assert.doesNotMatch(script, /git\s+(reset|clean)/);
 });
+
+test('установщик не создаёт конфликтующий wildcard-vhost и тихо ждёт готовность', async () => {
+  const script = await readFile(installerUrl, 'utf8');
+  assert.doesNotMatch(script, /SERVER_NAME="\$\{SERVER_NAME:-_\}"/);
+  assert.doesNotMatch(script, /SERVER_NAME="_"/);
+  assert.match(script, /systemctl restart nginx/);
+  assert.match(script, /curl[^\n]+--silent/);
+  assert.match(script, /--resolve "\$\{SERVER_NAME\}:443:127\.0\.0\.1"/);
+});
