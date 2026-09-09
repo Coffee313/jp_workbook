@@ -34,4 +34,5 @@ test('установщик не создаёт конфликтующий wildca
   assert.match(script, /systemctl restart nginx/);
   assert.match(script, /curl[^\n]+--silent/);
   assert.match(script, /--resolve "\$\{SERVER_NAME\}:443:127\.0\.0\.1"/);
+  assert.match(script, /openssl x509[^\n]+-check(host|ip)/);
 });

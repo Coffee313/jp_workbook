@@ -81,6 +81,9 @@ KEY_PATH="$TLS_DIR/${SERVICE_NAME}.key"
 STAMP="$(date +%Y%m%d%H%M%S)"
 UNIT_BACKUP=""
 NGINX_BACKUP=""
+CERT_BACKUP=""
+KEY_BACKUP=""
+CERT_CHANGED=false
 UNIT_INSTALLED=false
 NGINX_INSTALLED=false
 
@@ -88,6 +91,10 @@ rollback() {
   local code=$?
   trap - ERR
   echo "Установка не прошла проверку. Выполняется rollback…" >&2
+  if [[ "$CERT_CHANGED" == true ]]; then
+    if [[ -n "$CERT_BACKUP" && -f "$CERT_BACKUP" ]]; then cp -a "$CERT_BACKUP" "$CERT_PATH"; else rm -f "$CERT_PATH"; fi
+    if [[ -n "$KEY_BACKUP" && -f "$KEY_BACKUP" ]]; then cp -a "$KEY_BACKUP" "$KEY_PATH"; else rm -f "$KEY_PATH"; fi
+  fi
   if [[ "$NGINX_INSTALLED" == true ]]; then
     if [[ -n "$NGINX_BACKUP" && -f "$NGINX_BACKUP" ]]; then cp -a "$NGINX_BACKUP" "$NGINX_PATH"; else rm -f "$NGINX_PATH" "$NGINX_LINK"; fi
     nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
@@ -133,7 +140,18 @@ install -d -o "$RUN_USER" -g "$RUN_GROUP" -m 0750 "$DATA_DIR"
 
 echo "[3/7] Создание самоподписанного HTTPS-сертификата…"
 install -d -m 0750 "$TLS_DIR"
-if [[ ! -s "$CERT_PATH" || ! -s "$KEY_PATH" ]]; then
+CERT_VALID=false
+if [[ -s "$CERT_PATH" && -s "$KEY_PATH" ]]; then
+  if [[ "$SERVER_NAME" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+    openssl x509 -in "$CERT_PATH" -noout -checkip "$SERVER_NAME" >/dev/null 2>&1 && CERT_VALID=true
+  else
+    openssl x509 -in "$CERT_PATH" -noout -checkhost "$SERVER_NAME" >/dev/null 2>&1 && CERT_VALID=true
+  fi
+fi
+if [[ "$CERT_VALID" != true ]]; then
+  if [[ -f "$CERT_PATH" ]]; then CERT_BACKUP="${CERT_PATH}.backup-${STAMP}"; cp -a "$CERT_PATH" "$CERT_BACKUP"; fi
+  if [[ -f "$KEY_PATH" ]]; then KEY_BACKUP="${KEY_PATH}.backup-${STAMP}"; cp -a "$KEY_PATH" "$KEY_BACKUP"; fi
+  CERT_CHANGED=true
   CERT_NAME="$SERVER_NAME"
   PUBLIC_IP="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -m1 -E '^[0-9]+(\.[0-9]+){3}$' || true)"
   if [[ "$CERT_NAME" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then SAN="IP:${CERT_NAME}"; else SAN="DNS:${CERT_NAME}"; fi
@@ -144,7 +162,7 @@ if [[ ! -s "$CERT_PATH" || ! -s "$KEY_PATH" ]]; then
   chmod 0600 "$KEY_PATH"
   chmod 0644 "$CERT_PATH"
 else
-  echo "Существующий сертификат сохранён: $CERT_PATH"
+  echo "Существующий сертификат подходит для $SERVER_NAME и сохранён: $CERT_PATH"
 fi
 
 echo "[4/7] Установка systemd unit…"
