@@ -16,7 +16,6 @@ function showToast(message, error = false) {
 function showView(id) { $$('.view').forEach(view => view.classList.toggle('hidden', view.id !== id)); }
 function roleName(role) { return role === 'teacher' ? 'Учитель' : 'Ученик'; }
 function escapeHtml(value) { const node = document.createElement('div'); node.textContent = String(value ?? ''); return node.innerHTML; }
-function normalized(value) { return String(value || '').toLowerCase().replace(/[\s。、，,.!?！？「」『』()]/g, '').trim(); }
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -152,12 +151,27 @@ function buildSectionNav() {
   });
 }
 function setupSectionObserver() {
-  const observer = new IntersectionObserver(entries => {
-    const current = entries.filter(entry => entry.isIntersecting).sort((a,b) => b.intersectionRatio-a.intersectionRatio)[0];
-    if (!current) return;
-    $$('.section-link').forEach((button, index) => button.classList.toggle('active', WORKBOOK.sections[index].id === current.target.dataset.section));
-  }, { threshold:.2, rootMargin:'-10% 0px -55%' });
-  $$('.lesson-section').forEach(section => observer.observe(section));
+  if (state.sectionScrollHandler) window.removeEventListener('scroll', state.sectionScrollHandler);
+  let scheduled = false;
+  const update = () => {
+    scheduled = false;
+    const sections = $$('.lesson-section');
+    if (!sections.length) return;
+    const marker = Math.min(window.innerHeight * .32, 300);
+    let active = sections[0];
+    for (const section of sections) {
+      if (section.getBoundingClientRect().top <= marker) active = section;
+      else break;
+    }
+    $$('.section-link').forEach((button, index) => button.classList.toggle('active', WORKBOOK.sections[index].id === active.dataset.section));
+  };
+  state.sectionScrollHandler = () => {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(update);
+  };
+  window.addEventListener('scroll', state.sectionScrollHandler, { passive:true });
+  update();
 }
 
 function answerValue(id) { return state.room.answers?.[id]?.value ?? ''; }
@@ -179,23 +193,14 @@ function makeAnswerControl(item, type) {
   } else {
     control = document.createElement('input'); control.type = 'text'; control.placeholder = teacher ? 'Ученик ещё не ответил' : 'Введите ответ…'; control.value = answerValue(item.id); control.readOnly = teacher; control.autocomplete = 'off'; control.spellcheck = false; wrapper.appendChild(control);
   }
-  const result = document.createElement('div'); result.className = 'answer-result'; wrapper.appendChild(result);
   const inputs = control.matches?.('input,textarea,select') ? [control] : [...control.querySelectorAll('input')];
   inputs.forEach(input => {
     input.dataset.answerId = item.id;
-    if (item.answer) input.dataset.correctAnswer = item.answer;
-    if (!teacher) input.addEventListener(type === 'choice' ? 'change' : 'input', event => queueAnswer(item, event.target.value, result));
+    if (!teacher) input.addEventListener(type === 'choice' ? 'change' : 'input', event => queueAnswer(item, event.target.value));
   });
-  if (item.answer && answerValue(item.id)) showAutoResult(result, answerValue(item.id), item.answer);
   return wrapper;
 }
-function showAutoResult(node, value, answer) {
-  const good = normalized(value) === normalized(answer);
-  node.textContent = good ? '✓ Верно' : 'Пока не совпадает — попробуйте ещё раз';
-  node.className = `answer-result ${good ? 'correct' : 'wrong'}`;
-}
-function queueAnswer(item, value, result) {
-  if (item.answer) showAutoResult(result, value, item.answer);
+function queueAnswer(item, value) {
   state.room.answers[item.id] = { value };
   clearTimeout(state.timers.get(`answer:${item.id}`));
   state.timers.set(`answer:${item.id}`, setTimeout(() => state.socket.emit('answer:update', { roomId:state.room.id, exerciseId:item.id, value }), 180));
@@ -262,8 +267,6 @@ function applyAnswer(id, value) {
     if (control.type === 'radio') control.checked = control.value === value;
     else if (document.activeElement !== control || state.user.role === 'teacher') control.value = value;
   });
-  const correct = controls[0]?.dataset.correctAnswer;
-  if (correct) showAutoResult(document.querySelector(`[data-row-id="${CSS.escape(id)}"] .answer-result`), value, correct);
 }
 function applyFeedback(id, value) {
   const box = document.querySelector(`[data-feedback-id="${CSS.escape(id)}"]`); if (!box) return;
@@ -295,6 +298,7 @@ $('#back-dashboard').addEventListener('click', renderDashboard);
 $('#brand-home').addEventListener('click', () => state.user ? renderDashboard() : showView('auth-view'));
 $('#logout-button').addEventListener('click', async () => { try { await api('/api/auth/logout', { method:'POST', body:'{}' }); } catch {} clearSession(); });
 configureAuthTabs();
+document.documentElement.dataset.appReady = '1';
 
 (async function boot() {
   if (!state.token) { showView('auth-view'); return; }

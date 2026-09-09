@@ -32,6 +32,13 @@ async function register(f, login, role) {
 
 function auth(token) { return { authorization: `Bearer ${token}` }; }
 
+test('health endpoint подтверждает готовность без авторизации', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const { response, body } = await f.request('/api/health');
+  assert.equal(response.status, 200);
+  assert.deepEqual(body, { status:'ok' });
+});
+
 async function waitFor(socket, event) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`Timeout: ${event}`)), 2000);

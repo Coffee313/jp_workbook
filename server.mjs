@@ -61,7 +61,11 @@ function roomView(store, room) {
 }
 function canAccess(room, user) { return room && (room.teacherId === user.id || room.studentId === user.id); }
 
-export async function createWorkbookServer({ dataDir = path.join(ROOT, 'data'), port = Number(process.env.PORT || 3000) } = {}) {
+export async function createWorkbookServer({
+  dataDir = process.env.DATA_DIR || path.join(ROOT, 'data'),
+  port = Number(process.env.PORT || 3000),
+  host = process.env.HOST || '127.0.0.1'
+} = {}) {
   const store = new JsonStore(dataDir);
   await store.load();
   const app = express();
@@ -81,6 +85,7 @@ export async function createWorkbookServer({ dataDir = path.join(ROOT, 'data'), 
     next();
   }
 
+  app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
   app.post('/api/auth/register', async (req, res) => {
     const login = cleanLogin(req.body?.login);
     const role = cleanText(req.body?.role, 20);
@@ -216,14 +221,14 @@ export async function createWorkbookServer({ dataDir = path.join(ROOT, 'data'), 
       if (httpServer.listening) return actualPort;
       await new Promise((resolve, reject) => {
         httpServer.once('error', reject);
-        httpServer.listen(port, '127.0.0.1', () => { actualPort = httpServer.address().port; resolve(); });
+        httpServer.listen(port, host, () => { actualPort = httpServer.address().port; resolve(); });
       });
       return actualPort;
     },
     async stop() {
       await store.writeChain;
-      if (!httpServer.listening) return;
-      await new Promise(resolve => io.close(() => httpServer.close(resolve)));
+      await new Promise(resolve => io.close(resolve));
+      if (httpServer.listening) await new Promise(resolve => httpServer.close(resolve));
     }
   };
 }

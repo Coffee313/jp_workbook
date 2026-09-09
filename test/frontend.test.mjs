@@ -35,3 +35,12 @@ test('основной шрифт содержит японские глифы �
   assert.match(html, /Noto\+Sans\+JP/);
   assert.match(css, /--sans:\s*"Noto Sans JP"/);
 });
+
+test('ученик не получает автоматический вердикт, а меню следует за прокруткой', async () => {
+  const [app, css] = await Promise.all([read('app.js'), read('styles.css')]);
+  assert.doesNotMatch(app, /showAutoResult|correctAnswer/);
+  assert.match(app, /sectionScrollHandler/);
+  assert.match(app, /getBoundingClientRect\(\)\.top/);
+  assert.match(css, /\.site-header\{[^}]*position:sticky;top:0/);
+  assert.match(css, /\.lesson-aside\{[^}]*position:sticky;top:76px;height:calc\(100vh - 76px\)/);
+});
