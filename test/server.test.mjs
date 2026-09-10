@@ -111,6 +111,29 @@ test('ответ ученика мгновенно приходит учител
   assert.equal(state.body.room.answers['form-kau'].value, 'かって');
 });
 
+test('вошедший позже ученик получает присутствие уже подключённого учителя', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const teacher = await register(f, 'teacher-presence', 'teacher');
+  const student = await register(f, 'student-presence', 'student');
+  const made = await f.request('/api/rooms', { method:'POST', headers:auth(teacher.token), body:JSON.stringify({ title:'Присутствие' }) });
+  const room = made.body.room;
+  await f.request(`/api/invites/${room.inviteToken}/join`, { method:'POST', headers:auth(student.token), body:'{}' });
+
+  const teacherSocket = connectSocket(f.base, { auth:{ token:teacher.token }, transports:['websocket'] });
+  const studentSocket = connectSocket(f.base, { auth:{ token:student.token }, transports:['websocket'] });
+  t.after(() => { teacherSocket.close(); studentSocket.close(); });
+  await Promise.all([waitFor(teacherSocket, 'connect'), waitFor(studentSocket, 'connect')]);
+
+  const teacherJoined = waitFor(teacherSocket, 'presence:updated');
+  teacherSocket.emit('room:join', { roomId:room.id });
+  await teacherJoined;
+
+  const snapshotPromise = waitFor(studentSocket, 'presence:snapshot');
+  studentSocket.emit('room:join', { roomId:room.id });
+  const snapshot = await snapshotPromise;
+  assert.ok(snapshot.userIds.includes(teacher.user.id));
+});
+
 test('учитель может оставить обратную связь, ученик получает её сразу', async t => {
   const f = await fixture(); t.after(f.cleanup);
   const teacher = await register(f, 'teacher3', 'teacher');

@@ -33,6 +33,15 @@ if (process.env.CHROME_LIB_PATH) process.env.LD_LIBRARY_PATH = process.env.CHROM
 const browser = await chromium.launch({ executablePath, headless:true, args:['--no-sandbox'] });
 let teacherSocket;
 try {
+  teacherSocket = connectSocket(origin, { auth:{ token:teacher.token }, transports:['websocket'] });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Socket timeout')), 5000);
+    teacherSocket.once('connect', () => { clearTimeout(timer); resolve(); });
+  });
+  const teacherJoined = new Promise(resolve => teacherSocket.once('presence:updated', resolve));
+  teacherSocket.emit('room:join', { roomId:room.id });
+  await teacherJoined;
+
   const context = await browser.newContext({ viewport:{ width:1440, height:1000 } });
   await context.route(/fonts\.(googleapis|gstatic)\.com/, route => route.abort());
   await context.addInitScript(token => localStorage.setItem('jp-workbook-token', token), student.token);
@@ -45,18 +54,13 @@ try {
   await page.getByRole('heading', { name:/Здравствуйте/ }).waitFor();
   await page.locator('.room-card').click();
   await page.locator('#room-title').waitFor();
+  await page.waitForFunction(() => document.querySelector('#presence-person')?.textContent.includes('Сато-сэнсэй онлайн'));
 
   const answer = page.locator('[data-answer-id="form-2"]');
   await answer.fill('かって');
   assert.equal(await page.locator('[data-row-id="form-2"] .answer-result').count(), 0,
     'ученик получил элемент автоматической проверки');
 
-  teacherSocket = connectSocket(origin, { auth:{ token:teacher.token }, transports:['websocket'] });
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Socket timeout')), 5000);
-    teacherSocket.once('connect', () => { clearTimeout(timer); resolve(); });
-  });
-  teacherSocket.emit('room:join', { roomId:room.id });
   teacherSocket.emit('feedback:update', {
     roomId:room.id, exerciseId:'form-2', status:'correct', comment:'よくできました！'
   });
@@ -74,6 +78,7 @@ try {
   await page.screenshot({ path:path.join(outDir, 'student-reviewed.png'), fullPage:false });
   console.log(JSON.stringify({
     hiddenUntilTeacherReview:true,
+    teacherPresence:'онлайн',
     teacherFeedback:'よくできました！',
     activeSection:'03',
     aside:{ top:Math.round(asideBox.y), height:Math.round(asideBox.height) },

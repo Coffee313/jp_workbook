@@ -71,6 +71,27 @@ export async function createWorkbookServer({
   const app = express();
   const httpServer = createServer(app);
   const io = new SocketServer(httpServer, { cors: { origin: false } });
+  const roomPresence = new Map();
+
+  function addPresence(roomId, userId, socketId) {
+    if (!roomPresence.has(roomId)) roomPresence.set(roomId, new Map());
+    const users = roomPresence.get(roomId);
+    if (!users.has(userId)) users.set(userId, new Set());
+    users.get(userId).add(socketId);
+    return [...users.keys()];
+  }
+
+  function removePresence(roomId, userId, socketId) {
+    const users = roomPresence.get(roomId);
+    if (!users) return false;
+    const sockets = users.get(userId);
+    if (!sockets) return false;
+    sockets.delete(socketId);
+    if (sockets.size) return false;
+    users.delete(userId);
+    if (!users.size) roomPresence.delete(roomId);
+    return true;
+  }
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: '100kb' }));
@@ -172,8 +193,15 @@ export async function createWorkbookServer({
     socket.on('room:join', payload => {
       const room = store.data.rooms.find(item => item.id === payload?.roomId);
       if (!canAccess(room, socket.user)) return socket.emit('room:error', { error: 'Нет доступа к комнате.' });
+      if (socket.data.roomId && socket.data.roomId !== room.id) {
+        const wentOffline = removePresence(socket.data.roomId, socket.user.id, socket.id);
+        socket.leave(`room:${socket.data.roomId}`);
+        if (wentOffline) io.to(`room:${socket.data.roomId}`).emit('presence:updated', { userId:socket.user.id, role:socket.user.role, online:false });
+      }
       socket.join(`room:${room.id}`);
       socket.data.roomId = room.id;
+      const userIds = addPresence(room.id, socket.user.id, socket.id);
+      socket.emit('presence:snapshot', { roomId:room.id, userIds });
       io.to(`room:${room.id}`).emit('presence:updated', { userId: socket.user.id, role: socket.user.role, online: true });
     });
 
@@ -206,7 +234,9 @@ export async function createWorkbookServer({
     });
 
     socket.on('disconnect', () => {
-      if (socket.data.roomId) io.to(`room:${socket.data.roomId}`).emit('presence:updated', { userId: socket.user.id, role: socket.user.role, online: false });
+      if (!socket.data.roomId) return;
+      const wentOffline = removePresence(socket.data.roomId, socket.user.id, socket.id);
+      if (wentOffline) io.to(`room:${socket.data.roomId}`).emit('presence:updated', { userId: socket.user.id, role: socket.user.role, online: false });
     });
   });
 

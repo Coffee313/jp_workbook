@@ -84,6 +84,12 @@ function connectRealtime() {
   state.socket.on('room:updated', room => {
     if (state.room?.id === room.id) { state.room = room; updateRoomHeader(); }
   });
+  state.socket.on('presence:snapshot', payload => {
+    if (!state.room || payload.roomId !== state.room.id) return;
+    const peer = state.user.role === 'teacher' ? state.room.student : state.room.teacher;
+    state.peerOnline = Boolean(peer && payload.userIds.includes(peer.id));
+    updatePresence();
+  });
   state.socket.on('presence:updated', payload => {
     if (!state.room || payload.userId === state.user.id) return;
     state.peerOnline = payload.online; updatePresence();

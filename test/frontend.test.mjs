@@ -44,3 +44,9 @@ test('ученик не получает автоматический верди
   assert.match(css, /\.site-header\{[^}]*position:sticky;top:0/);
   assert.match(css, /\.lesson-aside\{[^}]*position:sticky;top:76px;height:calc\(100vh - 76px\)/);
 });
+
+test('клиент применяет снимок присутствия уже подключённого учителя', async () => {
+  const app = await read('app.js');
+  assert.match(app, /presence:snapshot/);
+  assert.match(app, /payload\.userIds\.includes\(peer\.id\)/);
+});
