@@ -22,7 +22,7 @@ test('установщик создаёт systemd-сервис, проверяе
   assert.match(script, /rollback/);
   assert.match(script, /npm test/);
   assert.match(script, /openssl req/);
-  assert.match(script, /listen 443 ssl/);
+  assert.match(script, /listen \$HTTPS_PORT ssl/);
   assert.match(script, /proxy_set_header Upgrade/);
   assert.doesNotMatch(script, /git\s+(reset|clean)/);
 });
@@ -33,6 +33,15 @@ test('установщик не создаёт конфликтующий wildca
   assert.doesNotMatch(script, /SERVER_NAME="_"/);
   assert.match(script, /systemctl restart nginx/);
   assert.match(script, /curl[^\n]+--silent/);
-  assert.match(script, /--resolve "\$\{SERVER_NAME\}:443:127\.0\.0\.1"/);
+  assert.match(script, /--resolve "\$\{SERVER_NAME\}:\$\{HTTPS_PORT\}:127\.0\.0\.1"/);
   assert.match(script, /openssl x509[^\n]+-check(host|ip)/);
+});
+
+test('HTTPS можно перенести с занятого 443 на отдельный порт', async () => {
+  const script = await readFile(installerUrl, 'utf8');
+  assert.match(script, /--https-port/);
+  assert.match(script, /listen \$HTTPS_PORT ssl/);
+  assert.match(script, /\$\{SERVER_NAME\}:\$\{HTTPS_PORT\}:127\.0\.0\.1/);
+  assert.match(script, /ufw allow "\$\{HTTPS_PORT\}\/tcp"/);
+  assert.match(script, /Порт .* занят/);
 });

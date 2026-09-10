@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 SERVICE_NAME="${SERVICE_NAME:-jp-workbook}"
 PORT="${PORT:-3000}"
+HTTPS_PORT="${HTTPS_PORT:-443}"
 BIND_ADDRESS="${BIND_ADDRESS:-127.0.0.1}"
 DATA_DIR="${DATA_DIR:-/var/lib/jp-workbook}"
 SERVER_NAME="${SERVER_NAME:-}"
@@ -17,14 +18,15 @@ usage() {
 
 Параметры:
   --port N                внутренний PORT Node.js (по умолчанию 3000)
+  --https-port N          внешний HTTPS-порт Nginx (по умолчанию 443)
   --bind ADDRESS          BIND_ADDRESS Node.js (по умолчанию 127.0.0.1)
   --server-name NAME      домен или IP для Nginx и сертификата
   --data-dir PATH         каталог постоянных данных
-  --open-firewall         открыть 80/443 в активном UFW
+  --open-firewall         открыть 80 и HTTPS-порт в активном UFW
   -h, --help              показать справку
 
 Те же параметры можно задать переменными SERVICE_NAME, PORT,
-BIND_ADDRESS, SERVER_NAME, DATA_DIR и OPEN_FIREWALL.
+HTTPS_PORT, BIND_ADDRESS, SERVER_NAME, DATA_DIR и OPEN_FIREWALL.
 Скрипт создаёт самоподписанный HTTPS-сертификат. Браузер покажет
 предупреждение, пока сертификат не будет заменён доверенным.
 HELP
@@ -33,6 +35,7 @@ HELP
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --port) PORT="${2:-}"; shift 2 ;;
+    --https-port) HTTPS_PORT="${2:-}"; shift 2 ;;
     --bind) BIND_ADDRESS="${2:-}"; shift 2 ;;
     --server-name) SERVER_NAME="${2:-}"; shift 2 ;;
     --data-dir) DATA_DIR="${2:-}"; shift 2 ;;
@@ -44,6 +47,7 @@ done
 
 [[ "${EUID}" -eq 0 ]] || { echo "Запустите через sudo: sudo ./install.sh" >&2; exit 1; }
 [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )) || { echo "Некорректный PORT: $PORT" >&2; exit 2; }
+[[ "$HTTPS_PORT" =~ ^[0-9]+$ ]] && (( HTTPS_PORT >= 1 && HTTPS_PORT <= 65535 )) || { echo "Некорректный HTTPS_PORT: $HTTPS_PORT" >&2; exit 2; }
 if [[ -z "$SERVER_NAME" ]]; then
   SERVER_NAME="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -m1 -E '^[0-9]+(\.[0-9]+){3}$' || true)"
   [[ -n "$SERVER_NAME" ]] || SERVER_NAME="$(hostname -f 2>/dev/null || hostname)"
@@ -117,7 +121,15 @@ trap rollback ERR
 echo "[1/7] Установка системных зависимостей…"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y ca-certificates curl gnupg nginx openssl git
+apt-get install -y ca-certificates curl gnupg nginx openssl git iproute2
+
+PORT_OWNER="$(ss -H -ltnp "sport = :${HTTPS_PORT}" 2>/dev/null || true)"
+if [[ -n "$PORT_OWNER" && "$PORT_OWNER" != *'"nginx"'* ]]; then
+  echo "Порт $HTTPS_PORT занят другим процессом:" >&2
+  echo "$PORT_OWNER" >&2
+  echo "Выберите свободный порт, например: sudo bash install.sh --https-port 8443 --server-name ВАШ_IP --open-firewall" >&2
+  exit 1
+fi
 
 NODE_MAJOR=0
 if command -v node >/dev/null 2>&1; then NODE_MAJOR="$(node -p 'Number(process.versions.node.split(".")[0])')"; fi
@@ -211,6 +223,8 @@ done
 [[ "$READY" == true ]] || { journalctl -u "$SERVICE_NAME" -n 80 --no-pager >&2 || true; false; }
 
 echo "[6/7] Настройка Nginx и WebSocket proxy…"
+HTTPS_SUFFIX=":${HTTPS_PORT}"
+[[ "$HTTPS_PORT" == 443 ]] && HTTPS_SUFFIX=""
 if [[ -f "$NGINX_PATH" ]]; then NGINX_BACKUP="${NGINX_PATH}.backup-${STAMP}"; cp -a "$NGINX_PATH" "$NGINX_BACKUP"; fi
 NGINX_TMP="$(mktemp)"
 cat > "$NGINX_TMP" <<EOF
@@ -218,12 +232,12 @@ server {
     listen 80;
     listen [::]:80;
     server_name $SERVER_NAME;
-    return 301 https://\$host\$request_uri;
+    return 301 https://\$host${HTTPS_SUFFIX}\$request_uri;
 }
 
 server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
+    listen $HTTPS_PORT ssl;
+    listen [::]:$HTTPS_PORT ssl;
     server_name $SERVER_NAME;
 
     ssl_certificate $CERT_PATH;
@@ -254,22 +268,25 @@ systemctl restart nginx
 
 HTTPS_READY=false
 for _ in {1..30}; do
-  if curl --silent --fail --insecure --max-time 3 --resolve "${SERVER_NAME}:443:127.0.0.1" "https://${SERVER_NAME}/api/health" | grep -q '"status":"ok"'; then HTTPS_READY=true; break; fi
+  if curl --silent --fail --insecure --max-time 3 --resolve "${SERVER_NAME}:${HTTPS_PORT}:127.0.0.1" "https://${SERVER_NAME}:${HTTPS_PORT}/api/health" | grep -q '"status":"ok"'; then HTTPS_READY=true; break; fi
   sleep 1
 done
 [[ "$HTTPS_READY" == true ]] || { journalctl -u "$SERVICE_NAME" -n 80 --no-pager >&2 || true; journalctl -u nginx -n 80 --no-pager >&2 || true; false; }
 
 echo "[7/7] Финальная настройка…"
 if [[ "$OPEN_FIREWALL" == true ]] && command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
-  ufw allow 'Nginx Full'
+  ufw allow 80/tcp
+  ufw allow "${HTTPS_PORT}/tcp"
 fi
 
 trap - ERR
 DISPLAY_HOST="$SERVER_NAME"
+DISPLAY_PORT=":${HTTPS_PORT}"
+[[ "$HTTPS_PORT" == 443 ]] && DISPLAY_PORT=""
 cat <<EOF
 
 Kotoba Room установлен и запущен.
-Адрес: https://${DISPLAY_HOST}/
+Адрес: https://${DISPLAY_HOST}${DISPLAY_PORT}/
 Сертификат: $CERT_PATH
 Важно: сертификат самоподписанный — при первом открытии браузер покажет предупреждение.
 
